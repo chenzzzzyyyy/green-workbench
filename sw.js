@@ -1,4 +1,4 @@
-const CACHE_NAME = 'greening-workbench-v2';
+const CACHE_NAME = 'greening-workbench-v3-single';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -7,19 +7,7 @@ const PRECACHE_ASSETS = [
   './icon-192x192.png',
   './icon-512x512.png',
   './icon-maskable.png',
-  './apple-touch-icon.png',
-  './css/style.css',
-  './js/storage.js',
-  './js/utils.js',
-  './js/data.js',
-  './js/app.js',
-  './js/home.js',
-  './js/tasks.js',
-  './js/inspection.js',
-  './js/seedling.js',
-  './js/payment.js',
-  './js/plants.js',
-  './js/settings.js'
+  './apple-touch-icon.png'
 ];
 
 // Install: precache core assets
@@ -43,33 +31,28 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fetch: serve from cache first, fall back to network
+// Fetch: network first, fall back to cache for shell + icons
 self.addEventListener('fetch', event => {
-  // Skip non-GET requests and external URLs
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then(cachedResponse => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then(networkResponse => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-          return networkResponse;
+    fetch(event.request)
+      .then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseToCache);
+          });
         }
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseToCache);
-        });
         return networkResponse;
-      }).catch(() => {
-        // If it's a navigation request and offline, return index.html shell
-        if (event.request.mode === 'navigate') {
-          return caches.match('./index.html');
-        }
-      });
-    })
+      })
+      .catch(() => {
+        return caches.match(event.request).then(cached => {
+          if (cached) return cached;
+          if (event.request.mode === 'navigate') return caches.match('./index.html');
+        });
+      })
   );
 });
