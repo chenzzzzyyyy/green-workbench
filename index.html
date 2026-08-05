@@ -3221,12 +3221,27 @@ GreenApp.tasks = (function () {
     var state = {
         search: '',
         statusFilter: '',
-        categoryFilter: ''
+        categoryFilter: '',
+        sortBy: 'default'
     };
+
+    var SORT_OPTIONS = [
+        { value: 'default', label: '📋 默认排序（进行中优先）' },
+        { value: 'plannedDate-asc', label: '📅 计划日期 ↑（早的在前）' },
+        { value: 'plannedDate-desc', label: '📅 计划日期 ↓（晚的在前）' },
+        { value: 'createdAt-desc', label: '🕐 创建时间 ↓（新的在前）' },
+        { value: 'createdAt-asc', label: '🕐 创建时间 ↑（旧的在前）' },
+        { value: 'urgency', label: '⚠️ 紧急程度（紧急→重要→普通）' },
+        { value: 'status', label: '🔄 状态（待办→已完成）' }
+    ];
+
+    var URGENCY_ORDER = { '紧急': 0, '重要': 1, '普通': 2 };
+    var STATUS_ORDER = { '待处理': 0, '处理中': 1, '待反馈': 2, '已完成': 3 };
 
     function render() {
         var tasks = GreenApp.storage.getAll('tasks');
         var filtered = filterTasks(tasks);
+        var sorted = sortTasks(filtered);
 
         var html = '';
 
@@ -3246,6 +3261,11 @@ GreenApp.tasks = (function () {
             html += '<option value="' + c + '"' + (state.categoryFilter === c ? ' selected' : '') + '>' + c + '</option>';
         });
         html += '</select>';
+        html += '<select class="filter-select" onchange="GreenApp.tasks.onSort(this.value)" title="排序方式">';
+        SORT_OPTIONS.forEach(function (o) {
+            html += '<option value="' + o.value + '"' + (state.sortBy === o.value ? ' selected' : '') + '>' + o.label + '</option>';
+        });
+        html += '</select>';
         html += '</div>';
         html += '<div class="toolbar-right">';
         html += '<button class="btn btn-default" onclick="GreenApp.tasks.exportCSV()">导出CSV</button>';
@@ -3255,15 +3275,16 @@ GreenApp.tasks = (function () {
 
         // 表格
         html += '<div class="panel"><div class="panel-body no-padding"><div class="table-wrapper">';
-        if (filtered.length === 0) {
+        if (sorted.length === 0) {
             html += '<div class="empty-state"><div class="empty-state-icon">📋</div>暂无工作记录</div>';
         } else {
             html += '<table class="data-table"><thead><tr>';
             html += '<th>任务名称</th><th>工作类别</th><th>所属项目</th><th>紧急程度</th><th>状态</th><th>计划日期</th><th>反馈</th><th>操作</th>';
             html += '</tr></thead><tbody>';
-            filtered.forEach(function (t) {
+            sorted.forEach(function (t) {
                 var urgencyClass = t.urgency === '紧急' ? 'urgency-urgent' : (t.urgency === '重要' ? 'urgency-important' : 'urgency-normal');
-                html += '<tr>';
+                var rowStyle = t.status === '已完成' ? ' style="opacity:0.55;"' : '';
+                html += '<tr' + rowStyle + '>';
                 html += '<td>' + GreenApp.utils.escapeHtml(t.taskName) + '</td>';
                 html += '<td><span class="tag tag-default">' + GreenApp.utils.escapeHtml(t.workCategory || '-') + '</span></td>';
                 html += '<td>' + GreenApp.utils.escapeHtml(t.project || '-') + '</td>';
@@ -3303,6 +3324,65 @@ GreenApp.tasks = (function () {
         });
     }
 
+    function sortTasks(tasks) {
+        // 始终先复制一份再排序，避免污染原数组
+        var arr = tasks.slice();
+        switch (state.sortBy) {
+            case 'plannedDate-asc':
+                arr.sort(function (a, b) {
+                    // 空日期排到末尾
+                    if (!a.plannedDate && !b.plannedDate) return 0;
+                    if (!a.plannedDate) return 1;
+                    if (!b.plannedDate) return -1;
+                    return a.plannedDate.localeCompare(b.plannedDate);
+                });
+                break;
+            case 'plannedDate-desc':
+                arr.sort(function (a, b) {
+                    if (!a.plannedDate && !b.plannedDate) return 0;
+                    if (!a.plannedDate) return 1;
+                    if (!b.plannedDate) return -1;
+                    return b.plannedDate.localeCompare(a.plannedDate);
+                });
+                break;
+            case 'createdAt-desc':
+                arr.sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
+                break;
+            case 'createdAt-asc':
+                arr.sort(function (a, b) { return (a.createdAt || '').localeCompare(b.createdAt || ''); });
+                break;
+            case 'urgency':
+                arr.sort(function (a, b) {
+                    var oa = URGENCY_ORDER[a.urgency] != null ? URGENCY_ORDER[a.urgency] : 99;
+                    var ob = URGENCY_ORDER[b.urgency] != null ? URGENCY_ORDER[b.urgency] : 99;
+                    if (oa !== ob) return oa - ob;
+                    // 紧急程度相同则按创建时间倒序
+                    return (b.createdAt || '').localeCompare(a.createdAt || '');
+                });
+                break;
+            case 'status':
+                arr.sort(function (a, b) {
+                    var oa = STATUS_ORDER[a.status] != null ? STATUS_ORDER[a.status] : 99;
+                    var ob = STATUS_ORDER[b.status] != null ? STATUS_ORDER[b.status] : 99;
+                    if (oa !== ob) return oa - ob;
+                    return (b.createdAt || '').localeCompare(a.createdAt || '');
+                });
+                break;
+            default:
+                // 默认：未完成优先 + 紧急程度 + 创建时间倒序
+                arr.sort(function (a, b) {
+                    var aDone = a.status === '已完成' ? 1 : 0;
+                    var bDone = b.status === '已完成' ? 1 : 0;
+                    if (aDone !== bDone) return aDone - bDone;
+                    var oa = URGENCY_ORDER[a.urgency] != null ? URGENCY_ORDER[a.urgency] : 99;
+                    var ob = URGENCY_ORDER[b.urgency] != null ? URGENCY_ORDER[b.urgency] : 99;
+                    if (oa !== ob) return oa - ob;
+                    return (b.createdAt || '').localeCompare(a.createdAt || '');
+                });
+        }
+        return arr;
+    }
+
     function onSearch(val) {
         state.search = val;
         render();
@@ -3311,6 +3391,11 @@ GreenApp.tasks = (function () {
     function onFilter(type, val) {
         if (type === 'status') state.statusFilter = val;
         if (type === 'category') state.categoryFilter = val;
+        render();
+    }
+
+    function onSort(val) {
+        state.sortBy = val || 'default';
         render();
     }
 
@@ -3498,6 +3583,7 @@ GreenApp.tasks = (function () {
         render: render,
         onSearch: onSearch,
         onFilter: onFilter,
+        onSort: onSort,
         openCreate: openCreate,
         openEdit: openEdit,
         openDetail: openDetail,
