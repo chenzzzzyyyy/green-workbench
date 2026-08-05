@@ -1,4 +1,4 @@
-const CACHE_NAME = 'greening-workbench-v3-single';
+const CACHE_NAME = 'greening-workbench-v4-plants-seed-2026-08-05';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
