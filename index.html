@@ -5711,11 +5711,25 @@ GreenApp.plants = (function () {
     }
 
     function renderPlantCard(p) {
+        var photos = p.photos || [];
+        var photoCount = photos.filter(function (pp) { return pp.src; }).length;
+        if (!photos.length && p.photo) photoCount = 1;
+
         var photoHTML = '';
-        if (p.photo) {
-            photoHTML = '<img src="' + p.photo + '" onclick="GreenApp.app.showImage(\'' + p.photo + '\')">';
+        if (photoCount > 0) {
+            photoHTML = '<div style="position:relative;width:100%;height:100%;">';
+            // 显示首张图
+            var firstSrc = photos.length > 0 ? photos[0].src : p.photo;
+            photoHTML += '<img src="' + firstSrc + '" style="width:100%;height:100%;object-fit:cover;" onclick="GreenApp.app.showImage(\'' + firstSrc + '\')">';
+            photoHTML += '<span style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">📷 ' + photoCount + ' 张</span>';
+            photoHTML += '</div>';
         } else {
-            photoHTML = '<span class="no-photo">🌿</span>';
+            photoHTML = '<span class="no-photo">🌿<div style="font-size:11px;margin-top:4px;color:#dc3545;">待补照片</div></span>';
+        }
+
+        var photoWarning = '';
+        if (photoCount < 3) {
+            photoWarning = '<div style="font-size:11px;color:#dc3545;margin-top:4px;">⚠️ 照片不足 3 张（' + photoCount + '/3）</div>';
         }
 
         return '<div class="plant-card" onclick="GreenApp.plants.openDetail(\'' + p.id + '\')">' +
@@ -5728,6 +5742,7 @@ GreenApp.plants = (function () {
             (p.evergreenOrDeciduous ? '<span class="tag tag-default">' + GreenApp.utils.escapeHtml(p.evergreenOrDeciduous) + '</span>' : '') +
             (p.family ? '<span class="tag tag-default">' + GreenApp.utils.escapeHtml(p.family) + '</span>' : '') +
             '</div>' +
+            photoWarning +
             '<div class="plant-card-footer">' +
             '<span>' + GreenApp.utils.formatDate(p.createdAt) + '</span>' +
             GreenApp.app.statusTag(p.learningStatus, 'plant') +
@@ -5939,8 +5954,8 @@ GreenApp.plants = (function () {
         html += '<div class="form-group"><label class="form-label">拍摄日期</label>';
         html += '<input type="date" class="form-input" id="f-shootingDate" value="' + (data.shootingDate || '') + '"></div>';
         html += '</div>';
-        html += '<div class="form-group"><label class="form-label">植物照片</label>';
-        html += GreenApp.app.photoUploadHTML('plantPhoto', data.photo, data.photoName);
+        html += '<div class="form-group"><label class="form-label">植物照片（至少 3 张）<span class="required">*</span></label>';
+        html += renderPhotoSlots(data.photos || []);
         html += '</div>';
         html += '<div class="form-group"><label class="form-label">项目应用记录</label>';
         html += '<input type="text" class="form-input" id="f-projectApplication" value="' + GreenApp.utils.escapeHtml(data.projectApplication || '') + '"></div>';
@@ -5964,7 +5979,7 @@ GreenApp.plants = (function () {
     }
 
     function getFormData() {
-        var photo = GreenApp.app.getPhotoData('plantPhoto');
+        var photos = getCurrentPhotosData();
         return {
             chineseName: document.getElementById('f-chineseName').value.trim(),
             scientificName: document.getElementById('f-scientificName').value.trim(),
@@ -5993,8 +6008,9 @@ GreenApp.plants = (function () {
             fieldObservation: document.getElementById('f-fieldObservation').value.trim(),
             shootingLocation: document.getElementById('f-shootingLocation').value.trim(),
             shootingDate: document.getElementById('f-shootingDate').value,
-            photo: photo.photo,
-            photoName: photo.name,
+            photos: photos,
+            photo: photos[0] ? photos[0].src : '',
+            photoName: photos[0] ? photos[0].caption : '',
             projectApplication: document.getElementById('f-projectApplication').value.trim(),
             learningStatus: document.getElementById('f-learningStatus').value,
             remarks: document.getElementById('f-remarks').value.trim()
@@ -6006,7 +6022,7 @@ GreenApp.plants = (function () {
         var footer = '<button class="btn btn-default" onclick="GreenApp.closeModal()">取消</button>' +
             '<button class="btn btn-primary" onclick="GreenApp.plants.save()">保存</button>';
         GreenApp.app.openModal('新增植物资料', html, footer, 'modal-lg');
-        GreenApp.app.bindPhotoUpload('plantPhoto');
+        bindPhotoSlots([]);
     }
 
     function openEdit(id) {
@@ -6016,7 +6032,7 @@ GreenApp.plants = (function () {
         var footer = '<button class="btn btn-default" onclick="GreenApp.closeModal()">取消</button>' +
             '<button class="btn btn-primary" onclick="GreenApp.plants.save(\'' + id + '\')">保存修改</button>';
         GreenApp.app.openModal('编辑植物资料', html, footer, 'modal-lg');
-        GreenApp.app.bindPhotoUpload('plantPhoto');
+        bindPhotoSlots(data.photos || []);
     }
 
     function openDetail(id) {
@@ -6053,8 +6069,16 @@ GreenApp.plants = (function () {
         html += detailItem('项目应用记录', p.projectApplication, true);
         html += detailItem('学习状态', '', false, GreenApp.app.statusTag(p.learningStatus, 'plant'));
         html += detailItem('备注', p.remarks, true);
-        if (p.photo) {
-            html += '<div class="detail-item detail-full"><div class="detail-label">植物照片</div><div class="detail-photo"><img src="' + p.photo + '" onclick="GreenApp.app.showImage(\'' + p.photo + '\')"></div></div>';
+        if (p.photos && p.photos.length > 0) {
+            html += '<div class="detail-item detail-full"><div class="detail-label">植物照片（' + p.photos.filter(function(pp){return pp.src;}).length + ' 张）</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px;">';
+            p.photos.forEach(function (pp) {
+                if (pp.src) {
+                    html += '<div><img src="' + pp.src + '" onclick="GreenApp.app.showImage(\'' + pp.src + '\')" style="width:100%;height:140px;object-fit:cover;border-radius:6px;cursor:pointer;"><div style="font-size:12px;color:#666;margin-top:4px;text-align:center;">' + GreenApp.utils.escapeHtml(pp.caption || '') + '</div></div>';
+                }
+            });
+            html += '</div></div>';
+        } else if (p.photo) {
+            html += '<div class="detail-item detail-full"><div class="detail-label">植物照片（旧）</div><div class="detail-photo"><img src="' + p.photo + '" onclick="GreenApp.app.showImage(\'' + p.photo + '\')"></div></div>';
         }
         html += detailItem('创建时间', GreenApp.utils.formatDate(p.createdAt, true));
         html += detailItem('最后修改', GreenApp.utils.formatDate(p.updatedAt, true));
@@ -6076,6 +6100,12 @@ GreenApp.plants = (function () {
         var data = getFormData();
         if (!data.chineseName) {
             GreenApp.utils.toast('请输入中文名称', 'error');
+            return;
+        }
+        // 验证至少3张照片
+        var photoCount = (data.photos || []).filter(function (p) { return p.src; }).length;
+        if (photoCount < 3) {
+            GreenApp.utils.toast('请至少上传 3 张植物照片（当前 ' + photoCount + ' / 3）', 'error');
             return;
         }
         if (id) data.id = id;
@@ -6652,40 +6682,157 @@ GreenApp.plants = (function () {
         html += '<div style="max-height:400px;overflow:auto;background:#fff;padding:12px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;line-height:1.8;">';
         html += list;
         html += '</div>';
-        html += '<div style="margin-top:12px;font-size:12px;color:#999;">所有植物都标记为"待学习"状态，你可以逐个编辑补充观察记录和照片。</div>';
+        html += '<div style="margin-top:12px;font-size:12px;color:#999;">所有植物都标记为"待学习"状态，你可以逐个编辑补充至少 3 张照片（整体/叶片/花果）。</div>';
 
         var footer = '<button class="btn btn-default" onclick="GreenApp.closeModal();GreenApp.plants.showSeedLibrary();">← 返回预览</button>' +
-            '<button class="btn btn-primary" onclick="GreenApp.plants.doImportSeedLibrary();">确认导入 ' + toImport.length + ' 种</button>';
+            '<button id="btn-confirm-import" class="btn btn-primary" data-count="' + toImport.length + '" onclick="GreenApp.plants.doImportSeedLibrary();">确认导入 ' + toImport.length + ' 种</button>';
         GreenApp.app.openModal('确认导入植物种子库', html, footer, 'modal-lg');
     }
 
-    // 执行实际导入
+    // 执行实际导入（绑定在按钮上，必须暴露在 GreenApp.plants 命名空间下）
     function doImportSeedLibrary() {
-        var existing = GreenApp.storage.getAll('plants');
-        var existingNames = {};
-        existing.forEach(function (p) {
-            if (p.chineseName) existingNames[p.chineseName] = true;
-        });
+        try {
+            var existing = GreenApp.storage.getAll('plants');
+            var existingNames = {};
+            existing.forEach(function (p) {
+                if (p.chineseName) existingNames[p.chineseName] = true;
+            });
 
-        var imported = 0;
-        var skipped = 0;
-        var now = GreenApp.utils.now();
-        SEED_LIBRARY.forEach(function (p) {
-            if (existingNames[p.chineseName]) {
-                skipped++;
-                return;
+            var imported = 0;
+            var skipped = 0;
+            var now = GreenApp.utils.now();
+            SEED_LIBRARY.forEach(function (p) {
+                if (existingNames[p.chineseName]) {
+                    skipped++;
+                    return;
+                }
+                var plant = Object.assign({}, p);
+                plant.id = GreenApp.utils.uuid();
+                plant.createdAt = now;
+                plant.updatedAt = now;
+                plant.photos = [];  // 种子植物无照片，用户后期补
+                plant.photo = '';
+                plant.photoName = '';
+                GreenApp.storage.save('plants', plant);
+                imported++;
+            });
+
+            GreenApp.closeModal();
+            GreenApp.utils.toast('成功导入 ' + imported + ' 种植物（跳过 ' + skipped + ' 种已有）', 'success');
+            render();
+        } catch (err) {
+            alert('导入失败：' + err.message + '\n请刷新页面后再试。');
+            console.error('doImportSeedLibrary 错误:', err);
+        }
+    }
+
+    // ========== 多张照片管理（最多3张，必填） ==========
+    var MAX_PHOTOS = 3;
+    var DEFAULT_CAPTIONS = ['整体形态', '叶片/枝条特写', '花果/树皮'];
+
+    function getCurrentPhotosData() {
+        var result = [];
+        for (var i = 0; i < MAX_PHOTOS; i++) {
+            var input = document.getElementById('plant-photo-input-' + i);
+            var captionInput = document.getElementById('plant-photo-caption-' + i);
+            var previewImg = document.getElementById('plant-photo-img-' + i);
+            var placeholder = document.getElementById('plant-photo-placeholder-' + i);
+            var removeBtn = document.getElementById('plant-photo-remove-' + i);
+
+            var src = (previewImg && previewImg.src && previewImg.src.indexOf('data:image') === 0) ? previewImg.src : '';
+            var caption = captionInput ? captionInput.value : '';
+
+            result.push({
+                src: src,
+                caption: caption
+            });
+        }
+        return result;
+    }
+
+    function renderPhotoSlots(photos) {
+        photos = photos || [];
+        var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px;">';
+        for (var i = 0; i < MAX_PHOTOS; i++) {
+            var photo = photos[i] || {};
+            var src = photo.src || '';
+            var caption = photo.caption || DEFAULT_CAPTIONS[i];
+            var hasPhoto = src.length > 0;
+
+            html += '<div style="border:1px solid ' + (hasPhoto ? '#2d5a27' : '#e5e7eb') + ';border-radius:8px;padding:8px;background:' + (hasPhoto ? '#f0f8ec' : '#fafafa') + ';">';
+            // 缩略图/上传区
+            html += '<div style="position:relative;width:100%;height:140px;background:#fff;border-radius:6px;overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;" onclick="document.getElementById(\'plant-photo-input-' + i + '\').click()">';
+            if (hasPhoto) {
+                html += '<img id="plant-photo-img-' + i + '" src="' + src + '" style="width:100%;height:100%;object-fit:cover;">';
+            } else {
+                html += '<span id="plant-photo-placeholder-' + i + '" style="color:#999;font-size:13px;">📷 点击上传</span>';
             }
-            var plant = Object.assign({}, p);
-            plant.id = GreenApp.utils.uuid();
-            plant.createdAt = now;
-            plant.updatedAt = now;
-            GreenApp.storage.save('plants', plant);
-            imported++;
-        });
+            html += '</div>';
+            html += '<input type="file" id="plant-photo-input-' + i + '" accept="image/*" style="display:none" data-idx="' + i + '">';
+            // 说明文字
+            html += '<input type="text" class="form-input" id="plant-photo-caption-' + i + '" value="' + GreenApp.utils.escapeHtml(caption) + '" placeholder="照片说明（如：' + DEFAULT_CAPTIONS[i] + '）" style="margin-top:6px;font-size:12px;padding:6px;">';
+            // 删除按钮（只在有照片时显示）
+            html += '<button type="button" id="plant-photo-remove-' + i + '" onclick="GreenApp.plants.clearPhotoSlot(' + i + ')" style="margin-top:4px;width:100%;padding:4px;background:#fff;color:#dc3545;border:1px solid #dc3545;border-radius:4px;font-size:12px;cursor:pointer;' + (hasPhoto ? '' : 'display:none;') + '">移除</button>';
+            html += '</div>';
+        }
+        html += '</div>';
+        html += '<div style="font-size:12px;color:#999;margin-top:8px;">📌 至少需要 3 张照片：整体形态 + 叶片/枝条 + 花果/树皮。建议用手机现场拍摄后上传。</div>';
+        return html;
+    }
 
-        GreenApp.closeModal();
-        GreenApp.utils.toast('成功导入 ' + imported + ' 种植物（跳过 ' + skipped + ' 种已有）', 'success');
-        render();
+    function bindPhotoSlots(photos) {
+        for (var i = 0; i < MAX_PHOTOS; i++) {
+            (function (idx) {
+                var input = document.getElementById('plant-photo-input-' + idx);
+                if (!input) return;
+                input.addEventListener('change', function (e) {
+                    var file = e.target.files[0];
+                    if (!file) return;
+                    if (file.size > 2 * 1024 * 1024) {
+                        GreenApp.utils.toast('图片超过2MB，请压缩后再上传', 'warning');
+                    }
+                    GreenApp.utils.readFileAsDataURL(file, function (dataUrl) {
+                        var slot = input.parentElement;
+                        var oldImg = slot.querySelector('img');
+                        var placeholder = slot.querySelector('span');
+                        if (oldImg) {
+                            oldImg.src = dataUrl;
+                        } else {
+                            var img = document.createElement('img');
+                            img.id = 'plant-photo-img-' + idx;
+                            img.src = dataUrl;
+                            img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+                            if (placeholder) placeholder.style.display = 'none';
+                            slot.insertBefore(img, placeholder);
+                        }
+                        // 显示删除按钮
+                        var removeBtn = document.getElementById('plant-photo-remove-' + idx);
+                        if (removeBtn) removeBtn.style.display = 'block';
+                        // 边框变绿
+                        slot.parentElement.style.borderColor = '#2d5a27';
+                        slot.parentElement.style.background = '#f0f8ec';
+                    });
+                });
+            })(i);
+        }
+    }
+
+    function clearPhotoSlot(idx) {
+        var input = document.getElementById('plant-photo-input-' + idx);
+        var img = document.getElementById('plant-photo-img-' + idx);
+        var placeholder = document.getElementById('plant-photo-placeholder-' + idx);
+        var removeBtn = document.getElementById('plant-photo-remove-' + idx);
+
+        if (img) img.remove();
+        if (placeholder) placeholder.style.display = '';
+        if (input) input.value = '';
+        if (removeBtn) removeBtn.style.display = 'none';
+
+        var slot = input ? input.parentElement : null;
+        if (slot && slot.parentElement) {
+            slot.parentElement.style.borderColor = '#e5e7eb';
+            slot.parentElement.style.background = '#fafafa';
+        }
     }
 
     return {
@@ -6702,7 +6849,12 @@ GreenApp.plants = (function () {
         showReviewAnswer: showReviewAnswer,
         markReview: markReview,
         importSeedLibrary: importSeedLibrary,
-        showSeedLibrary: showSeedLibrary
+        showSeedLibrary: showSeedLibrary,
+        doImportSeedLibrary: doImportSeedLibrary,
+        clearPhotoSlot: clearPhotoSlot,
+        getCurrentPhotosData: getCurrentPhotosData,
+        renderPhotoSlots: renderPhotoSlots,
+        bindPhotoSlots: bindPhotoSlots
     };
 })();
 
