@@ -5712,24 +5712,26 @@ GreenApp.plants = (function () {
 
     function renderPlantCard(p) {
         var photos = p.photos || [];
-        var photoCount = photos.filter(function (pp) { return pp.src; }).length;
-        if (!photos.length && p.photo) photoCount = 1;
+        var realCount = photos.filter(function (pp) { return pp.src && !isPlaceholderPhoto(pp.src); }).length;
+        var placeholderCount = photos.length - realCount;
+        if (!photos.length && p.photo) realCount = 1;
 
         var photoHTML = '';
-        if (photoCount > 0) {
+        if (photos.length > 0) {
             photoHTML = '<div style="position:relative;width:100%;height:100%;">';
-            // 显示首张图
-            var firstSrc = photos.length > 0 ? photos[0].src : p.photo;
-            photoHTML += '<img src="' + firstSrc + '" style="width:100%;height:100%;object-fit:cover;" onclick="GreenApp.app.showImage(\'' + firstSrc + '\')">';
-            photoHTML += '<span style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">📷 ' + photoCount + ' 张</span>';
+            // 优先用第一张真实图
+            var firstReal = photos.find(function (pp) { return pp.src && !isPlaceholderPhoto(pp.src); });
+            var firstSrc = firstReal ? firstReal.src : (photos[0] ? photos[0].src : '');
+            if (firstSrc) {
+                photoHTML += '<img src="' + firstSrc + '" style="width:100%;height:100%;object-fit:cover;" onclick="GreenApp.app.showImage(\'' + firstSrc.replace(/'/g, "\\'") + '\')">';
+            }
+            photoHTML += '<span style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">📷 ' + realCount + ' 实景</span>';
+            if (placeholderCount > 0) {
+                photoHTML += '<span style="position:absolute;top:6px;left:6px;background:rgba(255,150,0,0.85);color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">' + placeholderCount + ' 占位</span>';
+            }
             photoHTML += '</div>';
         } else {
             photoHTML = '<span class="no-photo">🌿<div style="font-size:11px;margin-top:4px;color:#dc3545;">待补照片</div></span>';
-        }
-
-        var photoWarning = '';
-        if (photoCount < 3) {
-            photoWarning = '<div style="font-size:11px;color:#dc3545;margin-top:4px;">⚠️ 照片不足 3 张（' + photoCount + '/3）</div>';
         }
 
         return '<div class="plant-card" onclick="GreenApp.plants.openDetail(\'' + p.id + '\')">' +
@@ -5742,7 +5744,6 @@ GreenApp.plants = (function () {
             (p.evergreenOrDeciduous ? '<span class="tag tag-default">' + GreenApp.utils.escapeHtml(p.evergreenOrDeciduous) + '</span>' : '') +
             (p.family ? '<span class="tag tag-default">' + GreenApp.utils.escapeHtml(p.family) + '</span>' : '') +
             '</div>' +
-            photoWarning +
             '<div class="plant-card-footer">' +
             '<span>' + GreenApp.utils.formatDate(p.createdAt) + '</span>' +
             GreenApp.app.statusTag(p.learningStatus, 'plant') +
@@ -6102,7 +6103,7 @@ GreenApp.plants = (function () {
             GreenApp.utils.toast('请输入中文名称', 'error');
             return;
         }
-        // 验证至少3张照片
+        // 验证至少3张照片（占位图也算）
         var photoCount = (data.photos || []).filter(function (p) { return p.src; }).length;
         if (photoCount < 3) {
             GreenApp.utils.toast('请至少上传 3 张植物照片（当前 ' + photoCount + ' / 3）', 'error');
@@ -6630,7 +6631,7 @@ GreenApp.plants = (function () {
           learningStatus: '待学习', remarks: '秋季香花植物' }
     ];
 
-    // ========== 自动从 Wikipedia 获取植物主图 ==========
+    // ========== 自动从 Wikipedia 获取植物主图（至少 3 张） ==========
     function fetchWikiImage(wikiTitle) {
         if (!wikiTitle) return Promise.resolve(null);
         var url = 'https://zh.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=' + encodeURIComponent(wikiTitle);
@@ -6653,7 +6654,34 @@ GreenApp.plants = (function () {
             });
     }
 
-    // 批量获取所有植物的图片（一次API最多50个）
+    // 生成 SVG 占位图（data:image/svg+xml）
+    function generatePlaceholderImage(chineseName, type) {
+        var configs = {
+            '整体形态': { bg: '#e8f5e3', fg: '#2d5a27', icon: '🌳' },
+            '叶片/枝条特写': { bg: '#f0f8ec', fg: '#3a7d34', icon: '🍃' },
+            '花果/树皮': { bg: '#fef6ec', fg: '#e8922d', icon: '🌸' }
+        };
+        var c = configs[type] || configs['整体形态'];
+        var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">' +
+            '<rect width="400" height="300" fill="' + c.bg + '"/>' +
+            '<text x="200" y="120" font-size="100" text-anchor="middle">' + c.icon + '</text>' +
+            '<text x="200" y="210" font-size="26" text-anchor="middle" fill="' + c.fg + '" font-family="Microsoft YaHei, sans-serif" font-weight="bold">' + chineseName + '</text>' +
+            '<text x="200" y="240" font-size="14" text-anchor="middle" fill="' + c.fg + '" font-family="Microsoft YaHei, sans-serif" opacity="0.7">' + type + '</text>' +
+            '<text x="200" y="270" font-size="12" text-anchor="middle" fill="' + c.fg + '" font-family="Microsoft YaHei, sans-serif" opacity="0.5">点击"编辑"上传真实照片</text>' +
+            '</svg>';
+        try {
+            return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+        } catch (e) {
+            return 'data:image/svg+xml;base64,' + btoa(svg);
+        }
+    }
+
+    // 判断 src 是否为占位图
+    function isPlaceholderPhoto(src) {
+        return src && src.indexOf('data:image/svg+xml') === 0;
+    }
+
+    // 批量获取所有植物的 3 张图（Wikipedia 主图 + 补充图 + SVG 占位）
     function fetchAllWikiImages(plants, progressCallback) {
         var titles = [];
         var titleToPlant = {};
@@ -6665,27 +6693,37 @@ GreenApp.plants = (function () {
         });
         if (titles.length === 0) return Promise.resolve({});
 
-        // Wikipedia API 一次最多50个
-        var batchSize = 20;
-        var batches = [];
+        // 第一步：批量查主图 + 图片文件列表
+        // 一次最多 20 个标题，图片限制每个 15 张
+        var batchSize = 15;
+        var titleBatches = [];
         for (var i = 0; i < titles.length; i += batchSize) {
-            batches.push(titles.slice(i, i + batchSize));
+            titleBatches.push(titles.slice(i, i + batchSize));
         }
 
-        var imageMap = {};
+        var imageMap = {};  // wikiTitle -> { main: url, others: [filenames] }
         var doneBatches = 0;
 
-        return batches.reduce(function (prev, batch) {
+        return titleBatches.reduce(function (prev, batch) {
             return prev.then(function () {
-                var url = 'https://zh.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=' + batch.map(encodeURIComponent).join('|');
+                var url = 'https://zh.wikipedia.org/w/api.php?action=query&prop=pageimages|images&titles=' +
+                    batch.map(encodeURIComponent).join('|') + '&imlimit=15&piprop=original&format=json';
                 return fetch(url, { mode: 'cors' })
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         if (data && data.query && data.query.pages) {
                             Object.keys(data.query.pages).forEach(function (key) {
                                 var page = data.query.pages[key];
-                                if (page.original && page.original.source && page.title) {
-                                    imageMap[page.title] = page.original.source;
+                                if (page.title) {
+                                    imageMap[page.title] = {
+                                        main: (page.original && page.original.source) ? page.original.source : null,
+                                        others: []
+                                    };
+                                    if (page.images) {
+                                        page.images.forEach(function (img) {
+                                            if (img.title) imageMap[page.title].others.push(img.title);
+                                        });
+                                    }
                                 }
                             });
                         }
@@ -6696,12 +6734,76 @@ GreenApp.plants = (function () {
                     .then(function () {
                         doneBatches++;
                         if (progressCallback) {
-                            progressCallback(doneBatches, batches.length, Object.keys(imageMap).length);
+                            progressCallback(doneBatches, titleBatches.length, Object.keys(imageMap).length);
                         }
                     });
             });
         }, Promise.resolve()).then(function () {
-            return imageMap;
+            // 第二步：把所有文件名转成URL
+            var allFiles = [];
+            var filenameSet = {};
+            Object.keys(imageMap).forEach(function (title) {
+                imageMap[title].others.forEach(function (fn) {
+                    if (!filenameSet[fn]) {
+                        filenameSet[fn] = true;
+                        allFiles.push(fn);
+                    }
+                });
+            });
+
+            if (allFiles.length === 0) {
+                return imageMap;
+            }
+
+            // 分批查 imageinfo（每批 20 个）
+            var fileBatchSize = 20;
+            var fileBatches = [];
+            for (var j = 0; j < allFiles.length; j += fileBatchSize) {
+                fileBatches.push(allFiles.slice(j, j + fileBatchSize));
+            }
+
+            var fileUrlMap = {};
+            var doneFileBatches = 0;
+
+            return fileBatches.reduce(function (prev, batch) {
+                return prev.then(function () {
+                    var url2 = 'https://zh.wikipedia.org/w/api.php?action=query&prop=imageinfo&iiprop=url&titles=' +
+                        batch.map(encodeURIComponent).join('|') + '&format=json';
+                    return fetch(url2, { mode: 'cors' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            if (data && data.query && data.query.pages) {
+                                Object.keys(data.query.pages).forEach(function (key) {
+                                    var page = data.query.pages[key];
+                                    if (page.imageinfo && page.imageinfo[0] && page.imageinfo[0].url) {
+                                        fileUrlMap[page.title] = page.imageinfo[0].url;
+                                    }
+                                });
+                            }
+                        })
+                        .catch(function (err) {
+                            console.warn('Wiki imageinfo 失败:', err);
+                        })
+                        .then(function () {
+                            doneFileBatches++;
+                            if (progressCallback) {
+                                var totalProgress = doneBatches + doneFileBatches;
+                                var totalAll = titleBatches.length + fileBatches.length;
+                                progressCallback(totalProgress, totalAll, Object.keys(imageMap).length);
+                            }
+                        });
+                });
+            }, Promise.resolve()).then(function () {
+                // 把 fileUrlMap 合并到 imageMap
+                Object.keys(imageMap).forEach(function (title) {
+                    var resolved = [];
+                    imageMap[title].others.forEach(function (fn) {
+                        if (fileUrlMap[fn]) resolved.push(fileUrlMap[fn]);
+                    });
+                    imageMap[title].resolved = resolved;
+                });
+                return imageMap;
+            });
         });
     }
 
@@ -6757,7 +6859,7 @@ GreenApp.plants = (function () {
         html += '<div style="max-height:400px;overflow:auto;background:#fff;padding:12px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;line-height:1.8;">';
         html += list;
         html += '</div>';
-        html += '<div style="margin-top:12px;font-size:12px;color:#999;">📌 导入时会自动从 Wikipedia（维基百科）获取主图，失败时仍可正常导入，由你后期补 3 张照片。</div>';
+        html += '<div style="margin-top:12px;font-size:12px;color:#999;">📌 导入时每种植物自动配 3 张图：从 Wikipedia 获取主图+补充图，缺图时用 SVG 占位（含植物名+emoji），你学习时可随时编辑替换。</div>';
 
         var footer = '<button class="btn btn-default" onclick="GreenApp.closeModal();GreenApp.plants.showSeedLibrary();">← 返回预览</button>' +
             '<button id="btn-confirm-import" class="btn btn-primary" data-count="' + toImport.length + '" onclick="GreenApp.plants.doImportSeedLibrary();">确认导入 ' + toImport.length + ' 种</button>';
@@ -6765,17 +6867,19 @@ GreenApp.plants = (function () {
     }
 
     // 执行实际导入（绑定在按钮上，必须暴露在 GreenApp.plants 命名空间下）
-    // 集成 Wikipedia 自动图片获取
+    // 集成 Wikipedia 自动图片获取（保证每种植物至少 3 张图）
     function doImportSeedLibrary() {
         var btn = document.getElementById('btn-confirm-import');
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '正在获取植物图片...';
+            btn.textContent = '正在获取植物图片（步骤 1/2：主图+图集）...';
         }
+
+        var captions = ['整体形态', '叶片/枝条特写', '花果/树皮'];
 
         fetchAllWikiImages(SEED_LIBRARY, function (done, total, found) {
             if (btn) {
-                btn.textContent = '获取图片中 ' + done + '/' + total + ' (已找到 ' + found + ')';
+                btn.textContent = '正在获取图片 ' + done + '/' + total + '（已获取 ' + found + ' 种植物数据）';
             }
         }).then(function (imageMap) {
             try {
@@ -6787,7 +6891,8 @@ GreenApp.plants = (function () {
 
                 var imported = 0;
                 var skipped = 0;
-                var withImage = 0;
+                var withRealImages = 0;   // 至少 1 张真实图
+                var withAllReal = 0;       // 3 张都是真实图
                 var now = GreenApp.utils.now();
                 SEED_LIBRARY.forEach(function (p) {
                     if (existingNames[p.chineseName]) {
@@ -6799,34 +6904,60 @@ GreenApp.plants = (function () {
                     plant.createdAt = now;
                     plant.updatedAt = now;
 
-                    // 自动从 Wikipedia 获取第一张主图
+                    // 自动从 Wikipedia 获取图片（保证 3 张）
                     var photos = [];
-                    var wikiUrl = p.wikiTitle ? imageMap[p.wikiTitle] : null;
-                    if (wikiUrl) {
-                        photos.push({ src: wikiUrl, caption: '整体形态（Wikipedia）' });
-                        withImage++;
-                    } else {
-                        photos.push({ src: '', caption: '整体形态' });
+                    var realCount = 0;
+                    var info = p.wikiTitle ? imageMap[p.wikiTitle] : null;
+
+                    // 第 1 张：主图（如果 Wikipedia 有）
+                    if (info && info.main) {
+                        photos.push({ src: info.main, caption: captions[0], isReal: true });
+                        realCount++;
                     }
-                    photos.push({ src: '', caption: '叶片/枝条特写' });
-                    photos.push({ src: '', caption: '花果/树皮' });
+                    // 第 2、3 张：补充图
+                    if (info && info.resolved && info.resolved.length > 0) {
+                        for (var i = 0; i < info.resolved.length && photos.length < 3; i++) {
+                            if (info.resolved[i] && info.resolved[i] !== info.main) {
+                                photos.push({ src: info.resolved[i], caption: captions[photos.length], isReal: true });
+                                realCount++;
+                            }
+                        }
+                    }
+                    // 补足到 3 张：缺少的用 SVG 占位
+                    while (photos.length < 3) {
+                        photos.push({ src: generatePlaceholderImage(p.chineseName, captions[photos.length]), caption: captions[photos.length], isReal: false });
+                    }
+
                     plant.photos = photos;
-                    plant.photo = wikiUrl || '';
-                    plant.photoName = wikiUrl ? '整体形态（Wikipedia）' : '';
+                    plant.photo = photos[0] ? photos[0].src : '';
+                    plant.photoName = photos[0] ? photos[0].caption : '';
+
+                    if (realCount > 0) withRealImages++;
+                    if (realCount === 3) withAllReal++;
 
                     GreenApp.storage.save('plants', plant);
                     imported++;
                 });
 
                 GreenApp.closeModal();
-                var msg = '成功导入 ' + imported + ' 种植物';
-                if (withImage > 0) msg += '，其中 ' + withImage + ' 种已自动配图';
-                if (skipped > 0) msg += '（跳过 ' + skipped + ' 种已有）';
+                var msg = '成功导入 ' + imported + ' 种植物（每种 3 张图，' + withRealImages + ' 种配真实图';
+                if (withAllReal < imported) {
+                    msg += '，' + (imported - withRealImages) + ' 种含占位图待你后续替换';
+                }
+                if (skipped > 0) msg += '；跳过 ' + skipped + ' 种已有';
+                msg += '）';
                 GreenApp.utils.toast(msg, 'success');
                 render();
             } catch (err) {
                 alert('导入失败：' + err.message + '\n请刷新页面后再试。');
                 console.error('doImportSeedLibrary 错误:', err);
+            }
+        }).catch(function (err) {
+            alert('获取 Wikipedia 图片失败：' + err.message + '\n请检查网络连接后重试。');
+            console.error('fetchAllWikiImages 错误:', err);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '重试导入';
             }
         });
     }
