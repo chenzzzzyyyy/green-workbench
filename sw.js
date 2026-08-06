@@ -1,4 +1,4 @@
-const CACHE_NAME = 'greening-workbench-v5-photos-3-min-2026-08-06';
+const CACHE_NAME = 'greening-workbench-v6-wiki-auto-image-2026-08-06';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
